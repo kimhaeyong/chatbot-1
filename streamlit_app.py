@@ -112,7 +112,8 @@ client = OpenAI(api_key=openai_api_key)
 # 사이드바: 로고/설정/샘플/초기화
 # ─────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.image(SIDEBAR_LOGO_URL, caption="Value · Moat · Cash Flow", use_container_width=True)
+    st.image(SIDEBAR_LOGO_PATH, use_container_width=True)
+    st.markdown("<h4 style='text-align:center; color:#F2D06B;'>Value · Moat · Cash Flow</h4>", unsafe_allow_html=True)
     st.header("⚙️ 설정")
     model = st.selectbox(
         "모델 선택",
