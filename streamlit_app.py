@@ -1,21 +1,9 @@
 # app.py
 # ------------------------------------------------------------
-# Cozy Winter Brown Theme — Buffett-Style AI Investment Copilot
-# - 온보딩(사용방법) 첫 화면
-# - 겨울/브라운 계열 감성 UI (커스텀 CSS)
-# - 버핏 원칙 내장 시스템 프롬프트
-# - 4 탭: Buffett Screener / Investment Memo / General Chat / DCF & Upload
-# - 업로드(PDF/TXT) 요약·리스크 구조화(JSON) → 표 렌더링 + 다운로드
-# - 간이 DCF 계산기(보수/기준/공격) + CSV 다운로드
-# - 워치리스트 + 샘플 프롬프트 + 대화 초기화
+# 가치 투자의 정석 — Buffett-Style AI Investment Copilot (화이트 배경)
 # ------------------------------------------------------------
-import os
-import re
-import io
-import json
-import time
+import os, re, io, json
 from typing import List, Dict, Any, Optional
-
 import streamlit as st
 import pandas as pd
 
@@ -29,26 +17,24 @@ except Exception:
 from openai import OpenAI
 
 # ========================== THEME SETTINGS ==========================
-# (따뜻한 겨울 브라운 톤 팔레트)
-COLOR_BG        = "#F7F1EA"  # 배경 아이보리-베이지
-COLOR_BG_ALT    = "#EFE6DC"  # 사이드바/카드 배경
-COLOR_TEXT      = "#3B2D26"  # 짙은 브라운 텍스트
-COLOR_SUBTEXT   = "#5E4B3C"  # 서브 텍스트
-COLOR_ACCENT    = "#A67C52"  # 메인 브라운 포인트
+# (화이트 배경 + 브라운 포인트)
+COLOR_BG        = "#FFFFFF"  # 배경: 화이트
+COLOR_TEXT      = "#2B2B2B"  # 본문 텍스트 딥 그레이
+COLOR_SUBTEXT   = "#6B5E53"  # 서브 텍스트 브라운 톤
+COLOR_ACCENT    = "#A67C52"  # 포인트 브라운
 COLOR_ACCENT_2  = "#D9C3A3"  # 연한 브라운
 COLOR_ACCENT_3  = "#8C633A"  # 버튼 hover/강조
-COLOR_SUCCESS   = "#769E6F"  # 따뜻한 그린
-COLOR_WARNING   = "#B2704E"  # 코퍼톤 경고
+COLOR_BORDER    = "#EAE2D8"  # 연한 베이지 경계선
 
-# 겨울 분위기의 따뜻한 이미지 (Unsplash 등)
-HERO_IMG_URL     = "https://images.unsplash.com/photo-1517686469429-8bdb88b9f907?q=80&w=1600"  # 코지 겨울 무드(머그+니트)
-SIDEBAR_LOGO_PATH = "/mnt/data/7caadb76-f6de-44ce-875f-b736fa88f0a6.png"  # 로컬 이미지가 있으면 사용
-SIDEBAR_FALLBACK  = "https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=800"  # 코지 머그/책 이미지
+# 이미지 (필요 시 로컬 교체)
+HERO_IMG_URL      = "https://images.unsplash.com/photo-1517686469429-8bdb88b9f907?q=80&w=1600"
+SIDEBAR_LOGO_PATH = "/mnt/data/7caadb76-f6de-44ce-875f-b736fa88f0a6.png"
+SIDEBAR_FALLBACK  = "https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=800"
 
 # =========================== PAGE CONFIG ===========================
 st.set_page_config(
-    page_title="☕ Cozy Value Copilot (Winter Edition)",
-    page_icon="🧣",
+    page_title="가치 투자의 정석",
+    page_icon="📘",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -56,95 +42,52 @@ st.set_page_config(
 # ============================= GLOBAL CSS ===========================
 st.markdown(f"""
 <style>
-/* 배경 & 텍스트 */
 html, body, [class*="css"] {{
   background-color: {COLOR_BG};
   color: {COLOR_TEXT};
   font-family: 'Noto Sans KR', 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Apple Color Emoji','Segoe UI Emoji','Segoe UI Symbol', sans-serif;
 }}
-
 /* 사이드바 */
 section[data-testid="stSidebar"] > div {{
-  background: linear-gradient(180deg, {COLOR_BG_ALT} 0%, {COLOR_BG} 100%);
-  border-right: 1px solid {COLOR_ACCENT_2}22;
+  background: linear-gradient(180deg, #FFFFFF 0%, #FAF7F3 100%);
+  border-right: 1px solid {COLOR_BORDER};
 }}
-
-/* 헤더/캡션 */
-h1, h2, h3, h4, h5 {{
-  color: {COLOR_TEXT};
-}}
-p, span, label {{
-  color: {COLOR_TEXT};
-}}
-small, .stCaption, .st-emotion-cache-1dp5vir p {{
-  color: {COLOR_SUBTEXT} !important;
-}}
-
-/* 버튼 스타일 */
+/* 헤더/텍스트 */
+h1, h2, h3, h4, h5 {{ color: {COLOR_TEXT}; }}
+small, .stCaption {{ color: {COLOR_SUBTEXT} !important; }}
+/* 버튼 */
 .stButton > button {{
   background-color: {COLOR_ACCENT};
-  color: {COLOR_BG};
-  border: none;
-  border-radius: 12px;
-  padding: 0.55em 1.0em;
-  font-weight: 700;
+  color: #FFF;
+  border: none; border-radius: 12px;
+  padding: 0.55em 1.0em; font-weight: 700;
   box-shadow: 0 4px 10px {COLOR_ACCENT}22;
 }}
-.stButton > button:hover {{
-  background-color: {COLOR_ACCENT_3};
-  color: #FFF;
-  transform: translateY(-1px);
-}}
-
-/* 입력/셀렉트/슬라이더 */
+.stButton > button:hover {{ background-color: {COLOR_ACCENT_3}; color: #FFF; transform: translateY(-1px); }}
+/* 입력/셀렉트/라디오 등 */
 .stTextInput > div > div > input,
 .stTextArea textarea,
 .stSelectbox > div > div > select,
 .stRadio > div, .stMultiSelect > div > div {{
-  background-color: #FFFFFF;
-  color: {COLOR_TEXT};
-  border-radius: 10px;
-  border: 1px solid {COLOR_ACCENT_2}AA;
+  background-color: #FFFFFF; color: {COLOR_TEXT};
+  border-radius: 10px; border: 1px solid {COLOR_BORDER};
 }}
-.stSlider > div > div > div {{
-  color: {COLOR_ACCENT};
-}}
-/* 카드 스타일 컨테이너 */
-.block-container {{
-  padding-top: 1.6rem;
-}}
+/* 카드 컨테이너 느낌 */
 div[data-testid="stVerticalBlock"] > div[style*="border"] {{
-  border: 1px solid {COLOR_ACCENT_2}77 !important;
+  border: 1px solid {COLOR_BORDER} !important;
   border-radius: 16px !important;
-  background: {COLOR_BG_ALT} !important;
+  background: #FFFFFF !important;
 }}
-
 /* 채팅 말풍선 */
 .stChatMessage {{
-  border-radius: 14px;
-  padding: 0.8em 0.9em;
-  background: #FFFFFF;
-  border: 1px solid {COLOR_ACCENT_2}66;
+  border-radius: 14px; padding: 0.8em 0.9em;
+  background: #FFFFFF; border: 1px solid {COLOR_BORDER};
   box-shadow: 0 2px 8px {COLOR_ACCENT}14;
 }}
-/* 구분선 */
-hr, .stDivider {{
-  border-color: {COLOR_ACCENT_2}66 !important;
-}}
-/* 알림 */
-.stAlert > div {{
-  background: #FFFFFF;
-  border: 1px solid {COLOR_ACCENT_2}AA;
-  border-radius: 12px;
-}}
-
-/* 데이터프레임 테이블 */
-.stDataFrame, .stTable {{
-  background: #FFFFFF;
-  border-radius: 12px;
-  border: 1px solid {COLOR_ACCENT_2}88;
-}}
-
+/* 구분선/알림/표 */
+hr, .stDivider {{ border-color: {COLOR_BORDER} !important; }}
+.stAlert > div {{ background:#FFFFFF; border:1px solid {COLOR_BORDER}; border-radius:12px; }}
+.stDataFrame, .stTable {{ background:#FFFFFF; border-radius:12px; border:1px solid {COLOR_BORDER}; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -164,11 +107,11 @@ if "system_prompt" not in st.session_state:
         "6) 과도한 확신 금지: 보수/기준/공격 3가지 시나리오로 가정 값을 나누어 제시하라.\n"
         "7) 최신 데이터 필요 시 '추정'임을 표시하고, 원자료/재무제표/10-K 확인을 권고하라.\n"
         "8) 가능한 경우 JSON 구조(summary, bullets[], checklist[], valuation{{bear,base,bull}}, risks[])도 함께 반환하라.\n"
-        "9) 어조는 겨울 시즌의 따뜻하고 차분한 톤으로 유지하라."
+        "9) 어조는 차분하고 단정한 톤으로 유지하라."
     )
 
 if "onboarding_open" not in st.session_state:
-    st.session_state.onboarding_open = True  # 첫 진입 시 사용방법 노출
+    st.session_state.onboarding_open = True
 
 if "profile" not in st.session_state:
     st.session_state.profile = {
@@ -182,40 +125,30 @@ if "profile" not in st.session_state:
 # ============================ HEADER AREA ============================
 left, right = st.columns([1, 2])
 with left:
-    st.title("☕ Cozy Value Copilot — Winter Edition")
-    st.caption("브라운 계열의 따뜻한 감성으로 함께하는 가치투자 비서")
+    st.title("가치 투자의 정석")
+    st.caption("화이트 배경 · 브라운 포인트 · 버핏 원칙 기반 가치투자 비서")
 with right:
-    st.image(HERO_IMG_URL, use_container_width=True, caption="Warm thoughts, careful valuations.")
+    st.image(HERO_IMG_URL, use_container_width=True, caption="Clarity first, price second.")
 
 st.divider()
 
 # ============================ ONBOARDING =============================
 def onboarding_panel():
     with st.container(border=True):
-        st.subheader("🧣 시작하기: 따뜻한 겨울 비서 사용 안내")
-        st.markdown(f"""
-**이 앱은 버핏의 가치투자 원칙**을 바탕으로, 겨울에 어울리는 **따뜻한 브라운 톤**으로 디자인된 투자 비서입니다.
+        st.subheader("📘 시작하기: ‘가치 투자의 정석’ 사용 안내")
+        st.markdown("""
+**버핏의 가치투자 원칙**을 기반으로 체크리스트/메모/간이 DCF/업로드 요약을 도와드립니다.
 
-**1) API 키 입력**  
-좌측 사이드바 또는 `.streamlit/secrets.toml`에 `OPENAI_API_KEY`를 저장하세요.
-
-**2) 설정**  
-- 모델: `gpt-4o-mini` 권장 (빠르고 경제적)  
-- temperature: 0.1~0.3 (보수적 분석에 유리)  
-- 성향/보유기간/지역/섹터/톤 → 답변에 반영
-
+**1) API 키 입력** — 사이드바 또는 `.streamlit/secrets.toml`에 `OPENAI_API_KEY` 저장  
+**2) 설정** — 모델(`gpt-4o-mini` 권장), temperature(0.1~0.3), 성향/보유기간/지역/섹터/톤  
 **3) 주요 기능**  
-- **🧰 Buffett Screener**: 티커 점검 + 체크리스트 + 간단 밸류 스냅샷  
+- **🧰 Buffett Screener**: 티커 점검 + 해자/현금흐름/ROIC 체크 + 간단 밸류  
 - **📝 Investment Memo**: 투자 메모 템플릿 자동 생성  
 - **💬 General Chat**: 자유 질의응답  
-- **🧮 DCF & Upload**: PDF/TXT 업로드 요약 + 간이 DCF 계산기
+- **🧮 DCF & Upload**: PDF/TXT 요약 구조화(JSON) + 간이 DCF 계산기  
+**4) 대화 관리** — 사이드바 ‘🧹 대화 초기화’와 워치리스트 관리
 
-**4) 대화 관리**  
-- 좌측 **🧹 대화 초기화**로 기록을 정리하세요.  
-- 워치리스트로 관심 종목을 모아둘 수 있어요.
-
-> ⚠️ 이 앱의 답변은 일반 정보 제공이며, 투자 자문/권유가 아닙니다.  
-> 최종 판단과 책임은 사용자에게 있으며, 세무/법률/회계는 전문가와 상의하세요.
+> ⚠️ 본 앱의 답변은 일반 정보 제공이며, 투자 자문/권유가 아닙니다. 최종 판단과 책임은 사용자에게 있습니다.
         """)
         cols = st.columns([1, 1, 2, 1])
         with cols[1]:
@@ -247,7 +180,7 @@ with st.sidebar:
         st.image(SIDEBAR_FALLBACK, use_container_width=True)
 
     st.markdown(
-        f"<h4 style='text-align:center; color:{COLOR_ACCENT}; margin-top:0.5rem;'>Cozy · Careful · Compounding</h4>",
+        f"<h4 style='text-align:center; color:{COLOR_ACCENT}; margin-top:0.5rem;'>Value • Moat • Cash Flow</h4>",
         unsafe_allow_html=True
     )
 
@@ -258,7 +191,8 @@ with st.sidebar:
 
     st.subheader("🎯 프로필")
     st.session_state.profile["risk"] = st.radio("리스크 성향", ["보수적", "중립", "공격적"],
-                                                index=["보수적","중립","공격적"].index(st.session_state.profile["risk"]), horizontal=True)
+                                                index=["보수적","중립","공격적"].index(st.session_state.profile["risk"]),
+                                                horizontal=True)
     st.session_state.profile["horizon"] = st.selectbox("보유기간", ["1~2년","3~5년","5~10년+"],
                                                        index=["1~2년","3~5년","5~10년+"].index(st.session_state.profile["horizon"]))
     st.session_state.profile["region"] = st.multiselect("지역", ["KR","US","JP","EU","EM"], default=st.session_state.profile["region"])
@@ -266,14 +200,6 @@ with st.sidebar:
         "섹터", ["Technology","Financials","Industrials","Energy","Healthcare","Consumer","Utilities","Materials"],
         default=st.session_state.profile["sectors"]
     )
-
-    st.subheader("🧠 어시스턴트 톤")
-    tone = st.radio("톤", ["중립/보수", "중립/균형", "기회발굴"], index=1, horizontal=True)
-    tone_line = {
-        "중립/보수": "안전마진을 최우선으로 삼고, 리스크를 먼저 식별/서술하라.",
-        "중립/균형": "긍/부정 요인을 균형있게 제시하되, 핵심 변수를 강조하라.",
-        "기회발굴": "저평가 구간/카탈리스트를 적극 탐색하되, 리스크 경고를 명시하라."
-    }[tone]
 
     st.subheader("👀 워치리스트")
     wl_new = st.text_input("티커 추가", placeholder="예: AAPL")
@@ -286,7 +212,6 @@ with st.sidebar:
     with c2:
         if st.button("초기화"):
             st.session_state.profile["watchlist"] = []
-
     st.write("📝", ", ".join(st.session_state.profile["watchlist"]) or "(비어있음)")
 
     if st.button("🧹 대화 초기화"):
@@ -298,8 +223,8 @@ with st.sidebar:
     if st.button("• 버핏 스크리너로 KO 점검"):
         st.session_state.messages.append({"role": "user", "content": "KO를 버핏 스크리너 체크리스트로 점검해줘."})
         st.rerun()
-    if st.button("• 겨울 시즌 소비재 시나리오"):
-        st.session_state.messages.append({"role":"user", "content":"겨울 시즌 소비재(의류/식음료) 섹터를 보수/기준/공격 3가지 시나리오로 정리해줘."})
+    if st.button("• 배당 성장주 3가지 시나리오"):
+        st.session_state.messages.append({"role":"user","content":"배당 성장주 3가지 시나리오(보수/기준/공격)로 정리해줘."})
         st.rerun()
 
 # ============================= HELPERS ===============================
@@ -345,22 +270,19 @@ def simple_dcf_scenarios(
     def scenario_calc(name, wacc, g):
         ebit = revenue * op_margin
         nopat = ebit * (1 - tax_rate)
-        fcf = nopat * (1 - reinvest_rate)    # 단순화된 FCF
-        if wacc <= g:
-            tv = float('nan')
-        else:
-            tv = fcf * (1 + g) / (wacc - g)  # 터미널 가치
-        pv_fcf = fcf / (1 + wacc)            # 1년 뒤 FCF 할인
+        fcf = nopat * (1 - reinvest_rate)
+        if wacc <= g: tv = float('nan')
+        else: tv = fcf * (1 + g) / (wacc - g)
+        pv_fcf = fcf / (1 + wacc)
         pv_tv = tv / ((1 + wacc) ** horizon_years) if tv == tv else float('nan')
         ev = pv_fcf + pv_tv
         price_per_share = ev / max(shares_out, 1e-6)
         return {"scenario": name, "WACC": wacc, "g": g, "FCF(yr1)": fcf, "EV(PV)": ev, "Price/Share": price_per_share}
-    rows = [
+    return pd.DataFrame([
         scenario_calc("보수", wacc_bear, g_bear),
         scenario_calc("기준", wacc_base, g_base),
         scenario_calc("공격", wacc_bull, g_bull),
-    ]
-    return pd.DataFrame(rows)
+    ])
 
 def build_messages(tone_line_: str) -> List[Dict[str, str]]:
     system_full = st.session_state.system_prompt + "\n" + f"추가 톤 지시: {tone_line_}"
@@ -430,31 +352,24 @@ with tab1:
 6) JSON도 함께 반환: keys = summary, bullets[], checklist[], valuation{{bear,base,bull}}, risks[]
 
 투자 성향: {st.session_state.profile["risk"]}, 보유기간: {st.session_state.profile["horizon"]}, 지역: {', '.join(st.session_state.profile["region"])}, 섹터 선호: {', '.join(st.session_state.profile["sectors"])}
-톤 가이드: {tone_line}
+톤 가이드: 균형 잡힌 분석을 유지하라.
 """
         st.session_state.messages.append({"role":"user","content":user_prompt})
-        text = call_chat(build_messages(tone_line_=tone_line), stream=True)
+        text = call_chat(build_messages(tone_line_="균형 잡힌 분석을 유지하라."), stream=True)
         data = parse_json_block(text)
         if data:
             st.write("### 📦 구조화 결과(JSON)")
-            if "summary" in data:
-                st.markdown("**요약**: " + str(data["summary"]))
+            if "summary" in data: st.markdown("**요약**: " + str(data["summary"]))
             if "bullets" in data and isinstance(data["bullets"], list):
-                st.markdown("**핵심 근거:**")
-                for b in data["bullets"]:
-                    st.markdown(f"- {b}")
+                st.markdown("**핵심 근거:**"); [st.markdown(f"- {b}") for b in data["bullets"]]
             if "checklist" in data and isinstance(data["checklist"], list):
                 st.dataframe(pd.DataFrame(data["checklist"]), use_container_width=True)
             if "valuation" in data and isinstance(data["valuation"], dict):
                 val_df = pd.DataFrame.from_dict(data["valuation"], orient="index").reset_index().rename(columns={"index":"Scenario"})
                 st.dataframe(val_df, use_container_width=True)
             if "risks" in data and isinstance(data["risks"], list):
-                st.markdown("**리스크**")
-                for r in data["risks"]:
-                    st.markdown(f"- {r}")
-            raw_md = io.StringIO()
-            raw_md.write("# Buffett Screener 결과\n\n")
-            raw_md.write(text)
+                st.markdown("**리스크**"); [st.markdown(f"- {r}") for r in data["risks"]]
+            raw_md = io.StringIO(); raw_md.write("# Buffett Screener 결과\n\n"); raw_md.write(text)
             st.download_button("⬇️ 원문 저장(.md)", data=raw_md.getvalue(), file_name=f"screener_{ticker}.md", mime="text/markdown")
             st.download_button("⬇️ JSON 저장(.json)", data=json.dumps(data, ensure_ascii=False, indent=2), file_name=f"screener_{ticker}.json", mime="application/json")
 
@@ -479,11 +394,9 @@ with tab2:
 - 10) JSON도 함께 반환: keys = thesis, moat, unit, capital, valuation{{bear,base,bull}}, risks[], catalysts[], monitoring[], verdict
 
 추가 힌트: {memo_hints}
-투자 성향: {st.session_state.profile["risk"]}, 보유기간: {st.session_state.profile["horizon"]}, 지역: {', '.join(st.session_state.profile["region"])}, 섹터 선호: {', '.join(st.session_state.profile["sectors"])}
-톤 가이드: {tone_line}
 """
         st.session_state.messages.append({"role":"user","content":user_prompt})
-        text = call_chat(build_messages(tone_line_=tone_line), stream=True)
+        text = call_chat(build_messages(tone_line_="차분하고 명료하게 설명하라."), stream=True)
         data = parse_json_block(text)
         if data:
             st.write("### 📦 구조화 결과(JSON)")
@@ -491,14 +404,10 @@ with tab2:
                 st.dataframe(pd.DataFrame.from_dict(data["valuation"], orient="index").reset_index().rename(columns={"index":"Scenario"}), use_container_width=True)
             for key in ["thesis","moat","unit","capital","verdict"]:
                 if key in data:
-                    st.markdown(f"**{key.capitalize()}**")
-                    st.write(data[key])
-            if "risks" in data:
-                st.markdown("**Risks**"); [st.markdown(f"- {r}") for r in data["risks"]]
-            if "catalysts" in data:
-                st.markdown("**Catalysts**"); [st.markdown(f"- {c}") for c in data["catalysts"]]
-            if "monitoring" in data:
-                st.markdown("**Monitoring**"); [st.markdown(f"- {m}") for m in data["monitoring"]]
+                    st.markdown(f"**{key.capitalize()}**"); st.write(data[key])
+            if "risks" in data: st.markdown("**Risks**"); [st.markdown(f"- {r}") for r in data["risks"]]
+            if "catalysts" in data: st.markdown("**Catalysts**"); [st.markdown(f"- {c}") for c in data["catalysts"]]
+            if "monitoring" in data: st.markdown("**Monitoring**"); [st.markdown(f"- {m}") for m in data["monitoring"]]
             raw_md = io.StringIO(); raw_md.write("# Investment Memo\n\n"); raw_md.write(text)
             st.download_button("⬇️ 원문 저장(.md)", data=raw_md.getvalue(), file_name=f"memo_{company}.md", mime="text/markdown")
             st.download_button("⬇️ JSON 저장(.json)", data=json.dumps(data, ensure_ascii=False, indent=2), file_name=f"memo_{company}.json", mime="application/json")
@@ -507,14 +416,14 @@ with tab2:
 with tab3:
     st.subheader("💬 일반 대화")
     if len(st.session_state.messages) == 0:
-        st.info("겨울의 차분한 톤으로 가치투자 질문을 시작해보세요. 예) '배당 성장주 3가지 시나리오로 안전마진 관점 정리'")
+        st.info("버핏 원칙으로 무엇이든 물어보세요. 예) '배당 성장주 3가지 시나리오로 안전마진 관점 정리'")
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
     prompt = st.chat_input("무엇을 도와드릴까요?")
     if prompt:
         st.session_state.messages.append({"role":"user","content":prompt})
-        call_chat(build_messages(tone_line_=tone_line), stream=True)
+        call_chat(build_messages(tone_line_="정확성과 간결함을 유지하라."), stream=True)
 
 # 4) DCF & Upload
 with tab4:
@@ -546,15 +455,12 @@ with tab4:
 JSON도 함께 반환: keys = summary, bullets[], risks[], checkpoints[], redflags[]
 """
                 st.session_state.messages.append({"role":"user","content":user_prompt})
-                text = call_chat(build_messages(tone_line_=tone_line), stream=True)
+                text = call_chat(build_messages(tone_line_="근거와 한계를 함께 제시하라."), stream=True)
                 data = parse_json_block(text)
                 if data:
-                    if "bullets" in data:
-                        st.markdown("**핵심 요약**"); [st.markdown(f"- {b}") for b in data["bullets"]]
-                    if "risks" in data:
-                        st.markdown("**리스크**"); [st.markdown(f"- {r}") for r in data["risks"]]
-                    if "checkpoints" in data:
-                        st.markdown("**체크포인트**"); [st.markdown(f"- {c}") for c in data["checkpoints"]]
+                    if "bullets" in data: st.markdown("**핵심 요약**"); [st.markdown(f"- {b}") for b in data["bullets"]]
+                    if "risks" in data: st.markdown("**리스크**"); [st.markdown(f"- {r}") for r in data["risks"]]
+                    if "checkpoints" in data: st.markdown("**체크포인트**"); [st.markdown(f"- {c}") for c in data["checkpoints"]]
 
     # 간이 DCF 계산기
     with rcol:
