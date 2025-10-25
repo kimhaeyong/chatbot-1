@@ -1,5 +1,5 @@
-# app.py — Buffett & Quant Copilot (DuplicateElementId fixed)
-import os
+# app.py — Buffett & Quant Copilot (API key handling + image fallback hardened)
+import os, re, urllib.request
 from typing import List, Dict
 import streamlit as st
 from openai import OpenAI
@@ -11,7 +11,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ---------- Images & Fallback ----------
+# -------------------- IMAGES & FALLBACK --------------------
 HERO_IMG_PATH = "/mnt/data/32d37cf6-cb03-4500-ab21-08ee05047b34.png"
 HERO_IMG_FALLBACK = "https://images.unsplash.com/photo-1559526324-593bc073d938?q=80&w=1600"
 SIDEBAR_LOGO_CANDIDATES = [
@@ -20,20 +20,33 @@ SIDEBAR_LOGO_CANDIDATES = [
     "https://images.unsplash.com/photo-1542228262-3d663b306035?q=80&w=400",
     "https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=400",
 ]
+
+def url_exists(url: str, timeout: float = 4.0) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return 200 <= getattr(r, "status", 200) < 300
+    except Exception:
+        return False
+
 def show_sidebar_image():
+    # 0) 사용자가 업로드한 로고가 있으면 최우선
+    if "sidebar_logo_bytes" in st.session_state:
+        st.image(st.session_state["sidebar_logo_bytes"], use_container_width=True)
+        return
+    # 1) 로컬
     for src in SIDEBAR_LOGO_CANDIDATES:
-        try:
-            if src.startswith("http"):
-                st.image(src, use_container_width=True)
-                return
-            elif os.path.exists(src):
-                st.image(src, use_container_width=True)
-                return
-        except Exception:
-            continue
+        if not src.startswith("http") and os.path.exists(src):
+            st.image(src, use_container_width=True)
+            return
+    # 2) URL (가능한 경우에만)
+    for src in SIDEBAR_LOGO_CANDIDATES:
+        if src.startswith("http") and url_exists(src):
+            st.image(src, use_container_width=True)
+            return
+    # 3) 최종 폴백: 이모지(깨진 아이콘 방지)
     st.markdown("<div style='text-align:center;font-size:44px;'>📈</div>", unsafe_allow_html=True)
 
-# ---------- Session State ----------
+# -------------------- STATE --------------------
 if "buffett_messages" not in st.session_state:
     st.session_state.buffett_messages: List[Dict[str, str]] = []
 if "quant_messages" not in st.session_state:
@@ -51,7 +64,7 @@ QUANT_SYSTEM = (
     "구성: 4줄 요약 → 전략 정의(신호/리밸런스/포지션) → 백테스트 체크리스트 → 성과지표 → 리스크/주의점(+의사코드).\n"
 )
 
-# ---------- Header ----------
+# -------------------- HEADER --------------------
 left, right = st.columns([1, 2])
 with left:
     st.title("가치 투자의 정석 — Buffett & Quant Copilot")
@@ -63,20 +76,66 @@ with right:
         st.image(HERO_IMG_FALLBACK, use_container_width=True, caption="Clarity first, price second.")
 st.divider()
 
-# ---------- API Key ----------
+# -------------------- API KEY (보안/검증/테스트) --------------------
+def redact_api_key(text: str) -> str:
+    # sk-xxxx, sk-proj-xxxx 형태를 마스킹
+    return re.sub(r"sk-[a-zA-Z0-9_-]{8,}", "sk-•••(redacted)", text)
+
+def looks_like_key(k: str) -> bool:
+    # 너-무 엄격하게 막지 않고 기본적인 오타만 잡습니다.
+    return k.startswith("sk-") and len(k) > 20
+
 openai_api_key = st.secrets.get("OPENAI_API_KEY", "")
 if not openai_api_key:
     openai_api_key = st.text_input("🔑 OpenAI API Key", type="password", key="api_key_input",
-                                   help="secrets.toml에 OPENAI_API_KEY로 저장하면 입력창이 숨겨져요.")
+                                   help="`secrets.toml`에 OPENAI_API_KEY를 저장하면 입력창이 숨겨져요.")
 if not openai_api_key:
     st.info("API 키를 입력하면 챗봇을 시작할 수 있습니다.", icon="🔒")
     st.stop()
-client = OpenAI(api_key=openai_api_key)
 
-# ---------- Sidebar ----------
+col_key1, col_key2 = st.columns([1,1])
+with col_key1:
+    test_now = st.button("🔍 연결 테스트", help="모델 목록/간단 호출로 키 유효성을 확인합니다.")
+with col_key2:
+    remember_logo = st.file_uploader("사이드바 로고(선택)", type=["png","jpg","jpeg"], key="sidebar_logo_uploader")
+    if remember_logo is not None:
+        st.session_state["sidebar_logo_bytes"] = remember_logo.read()
+
+client = None
+if looks_like_key(openai_api_key):
+    try:
+        client = OpenAI(api_key=openai_api_key)
+        if test_now:
+            # 가벼운 호출로 유효성 확인 (예외는 아래 except에서 잡아서 친절 메시지로 표시)
+            _ = client.models.list()
+            st.success("✅ 연결 성공! 키가 유효합니다.")
+    except Exception as e:
+        msg = str(e)
+        # 401/invalid_api_key 친절 메시지
+        if "invalid_api_key" in msg or "Incorrect API key" in msg or "401" in msg:
+            st.error(
+                "❌ API 키가 유효하지 않습니다. 다음을 확인하세요.\n"
+                "1) 키를 다시 복사/붙여넣기 (공백 제거)\n"
+                "2) 올바른 **프로젝트 키** 사용 (`sk-...` / `sk-proj-...`)\n"
+                "3) 조직/프로젝트 권한 확인\n"
+                "4) 모델 접근 권한(gpt-4o-mini 등) 활성화\n"
+                "오류 원문: " + redact_api_key(msg)
+            )
+            st.stop()
+        else:
+            st.error("요청 중 오류가 발생했습니다: " + redact_api_key(msg))
+            st.stop()
+else:
+    st.warning("입력한 값이 OpenAI API 키 형식처럼 보이지 않습니다. `sk-`로 시작하는 키를 입력해 주세요.")
+    st.stop()
+
+# -------------------- SIDEBAR --------------------
 with st.sidebar:
     show_sidebar_image()
-    st.markdown("<h4 style='text-align:center; color:#F2D06B; font-weight:800; letter-spacing:0.2px; margin:0.4rem 0;'>Value · Moat · Cash Flow</h4>", unsafe_allow_html=True)
+    st.markdown(
+        "<h4 style='text-align:center; color:#F2D06B; font-weight:800; letter-spacing:0.2px; margin:0.4rem 0;'>Value · Moat · Cash Flow</h4>",
+        unsafe_allow_html=True
+    )
 
     st.header("⚙️ 설정")
     model = st.selectbox("모델", ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"], index=0, key="model_sel")
@@ -87,8 +146,10 @@ with st.sidebar:
     risk_profile = st.radio("리스크 성향", ["보수적", "중립", "공격적"], index=1, horizontal=True, key="risk_radio")
     horizon = st.selectbox("보유기간", ["1~2년", "3~5년", "5~10년+"], index=1, key="horizon_sel")
     region = st.multiselect("지역", ["KR","US","JP","EU","EM"], default=["US","KR"], key="region_ms")
-    sectors = st.multiselect("섹터", ["Technology","Financials","Industrials","Energy","Healthcare","Consumer","Utilities","Materials"],
-                             default=["Technology","Consumer"], key="sectors_ms")
+    sectors = st.multiselect(
+        "섹터", ["Technology","Financials","Industrials","Energy","Healthcare","Consumer","Utilities","Materials"],
+        default=["Technology","Consumer"], key="sectors_ms"
+    )
 
     if st.button("🧹 대화 초기화", key="reset_all"):
         st.session_state.buffett_messages = []
@@ -96,7 +157,7 @@ with st.sidebar:
         st.success("두 탭의 대화를 모두 초기화했습니다.")
         st.rerun()
 
-# ---------- Helpers ----------
+# -------------------- HELPERS --------------------
 def trim_messages(messages: List[Dict[str, str]], max_pairs: int = 18) -> List[Dict[str, str]]:
     ua = [m for m in messages if m["role"] in ("user", "assistant")]
     return messages if len(ua) <= 2 * max_pairs else ua[-2 * max_pairs:]
@@ -124,18 +185,25 @@ def stream_chat(messages: List[Dict[str, str]]):
             )
             return st.write_stream(stream)
         except Exception as e:
-            placeholder.error(f"요청 중 오류가 발생했습니다: {e}")
+            msg = str(e)
+            # 401/키 문제는 친절 메시지로
+            if "invalid_api_key" in msg or "Incorrect API key" in msg or "401" in msg:
+                placeholder.error(
+                    "❌ API 키 인증에 실패했습니다. 키를 다시 입력하거나 권한을 확인하세요.\n"
+                    "오류: " + redact_api_key(msg)
+                )
+            else:
+                placeholder.error("요청 중 오류가 발생했습니다: " + redact_api_key(msg))
             return ""
 
-# ---------- Tabs ----------
+# -------------------- TABS --------------------
 tabGuide, tabBuffett, tabQuant = st.tabs(["📘 사용설명서", "🧭 워렌 버핏 투자", "📊 퀀트 투자"])
 
-# Guide
 with tabGuide:
     st.subheader("📘 ‘가치 투자의 정석’ 사용설명서")
     st.markdown("""
 - **🧭 워렌 버핏 투자**: 해자·현금흐름·안전마진 중심 점검/메모/밸류 스냅샷  
-- **📊 퀀트 투자**: 규칙 기반 전략 정의, 백테스트 가정, 성과지표·리스크 해석  
+- **📊 퀀트 투자**: 규칙 기반 전략 정의, 백테스트 가정, 성과·리스크 지표 해석  
 모든 답변은 **일반 정보 제공**이며, 투자 자문/권유가 아닙니다.
 """)
 
@@ -226,7 +294,7 @@ with tabQuant:
         text = stream_chat(build_messages("quant"))
         st.session_state.quant_messages.append({"role": "assistant", "content": text})
 
-# ---------- Footer ----------
+# -------------------- FOOTER --------------------
 st.divider()
 st.caption(
     "※ 본 앱의 답변은 일반 정보 제공 목적이며, 투자 자문 또는 권유가 아닙니다. "
