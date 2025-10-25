@@ -1,3 +1,4 @@
+import os
 import time
 from typing import List, Dict
 import streamlit as st
@@ -12,9 +13,12 @@ st.set_page_config(
     layout="wide"
 )
 
-# 히어로/사이드바 이미지(원하면 로컬 경로로 교체)
-HERO_IMG_URL = "https://images.unsplash.com/photo-1559526324-593bc073d938?q=80&w=1600"
-SIDEBAR_LOGO_URL = "https://images.unsplash.com/photo-1542228262-3d663b306035?q=80&w=400"
+# 히어로/사이드바 이미지
+HERO_IMG_PATH = "/mnt/data/32d37cf6-cb03-4500-ab21-08ee05047b34.png"  # ← 주식 투자 관련 로컬 이미지
+HERO_IMG_FALLBACK = "https://images.unsplash.com/photo-1559526324-593bc073d938?q=80&w=1600"
+
+SIDEBAR_LOGO_PATH = "/mnt/data/7caadb76-f6de-44ce-875f-b736fa88f0a6.png"  # 있으면 사용
+SIDEBAR_LOGO_URL  = "https://images.unsplash.com/photo-1542228262-3d663b306035?q=80&w=400"  # 없으면 이 URL 사용
 
 # ─────────────────────────────────────────────────────────────
 # Session State 초기화
@@ -34,7 +38,6 @@ if "system_prompt" not in st.session_state:
         "7) 최신 데이터 필요 시 '추정'임을 표시하고, 원자료/재무제표/10-K 확인을 권고하라.\n"
     )
 if "onboarding_open" not in st.session_state:
-    # True면 처음에 온보딩 패널을 보여줌(사용자가 닫을 수 있음)
     st.session_state.onboarding_open = True
 
 # ─────────────────────────────────────────────────────────────
@@ -45,12 +48,16 @@ with left:
     st.title("📈 Buffett-Style AI Investment Copilot")
     st.caption("AI 에이전시용 가치투자 비서 · 저평가/현금흐름 중심 · 해자 점검 · 리스크 우선")
 with right:
-    st.image(HERO_IMG_URL, use_container_width=True, caption="Be fearful when others are greedy, and vice versa.")
+    # 로컬 이미지가 있으면 사용, 없으면 URL 폴백
+    if os.path.exists(HERO_IMG_PATH):
+        st.image(HERO_IMG_PATH, use_container_width=True, caption="Clarity first, price second.")
+    else:
+        st.image(HERO_IMG_FALLBACK, use_container_width=True, caption="Clarity first, price second.")
 
 st.divider()
 
 # ─────────────────────────────────────────────────────────────
-# 온보딩 패널 (처음 화면에 사용 방법 표시)
+# 온보딩 패널
 # ─────────────────────────────────────────────────────────────
 def onboarding_panel():
     with st.container(border=True):
@@ -88,16 +95,14 @@ def onboarding_panel():
                 st.rerun()
         with cols[2]:
             if st.button("ℹ️ 다음에도 보기", use_container_width=True):
-                # 닫지 않고 유지
                 pass
 
-# 온보딩 패널 표시(열려 있을 때만)
 if st.session_state.onboarding_open:
     onboarding_panel()
-    st.stop()  # 온보딩만 보여주고 아래 UI는 잠시 멈춤
+    st.stop()
 
 # ─────────────────────────────────────────────────────────────
-# OpenAI Key (온보딩 이후 표시)
+# OpenAI Key
 # ─────────────────────────────────────────────────────────────
 openai_api_key = st.secrets.get("OPENAI_API_KEY", "")
 if not openai_api_key:
@@ -112,7 +117,12 @@ client = OpenAI(api_key=openai_api_key)
 # 사이드바: 로고/설정/샘플/초기화
 # ─────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.image(SIDEBAR_LOGO_PATH, use_container_width=True)
+    # ⬇︎ 여기 수정: PATH가 있으면 PATH, 없으면 URL
+    if os.path.exists(SIDEBAR_LOGO_PATH):
+        st.image(SIDEBAR_LOGO_PATH, use_container_width=True)
+    else:
+        st.image(SIDEBAR_LOGO_URL, use_container_width=True)
+
     st.markdown("<h4 style='text-align:center; color:#F2D06B;'>Value · Moat · Cash Flow</h4>", unsafe_allow_html=True)
     st.header("⚙️ 설정")
     model = st.selectbox(
@@ -145,13 +155,11 @@ with st.sidebar:
             st.session_state.system_prompt = edited
             st.success("시스템 프롬프트 적용 완료")
 
-    # 초기화 버튼
     if st.button("🧹 대화 초기화"):
         st.session_state.messages = []
         st.success("대화를 초기화했습니다.")
         st.rerun()
 
-    # 샘플 프롬프트
     st.subheader("💡 샘플 프롬프트")
     if st.button("• 버핏 스크리너 체크리스트로 AAPL 점검"):
         st.session_state.messages.append({"role": "user", "content": "AAPL을 버핏 스크리너 체크리스트로 점검해줘."})
@@ -242,11 +250,12 @@ with tab3:
         st.session_state.messages.append({"role": "user", "content": prompt})
 
 # ─────────────────────────────────────────────────────────────
-# 모델 호출 (스트리밍) — 마지막 메시지가 user면 실행
+# 모델 호출 (스트리밍)
 # ─────────────────────────────────────────────────────────────
 def build_messages() -> List[Dict[str, str]]:
     system_full = st.session_state.system_prompt + "\n" + f"추가 톤 지시: {tone_line}"
-    history = trim_messages(st.session_state.messages, max_pairs=18)
+    ua = [m for m in st.session_state.messages if m["role"] in ("user", "assistant")]
+    history = ua[-36:]  # 최근 18쌍 유지
     return [{"role": "system", "content": system_full}] + history
 
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
